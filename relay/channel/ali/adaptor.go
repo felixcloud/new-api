@@ -236,9 +236,6 @@ func (a *Adaptor) ConvertEmbeddingRequest(c *gin.Context, info *relaycommon.Rela
 }
 
 func (a *Adaptor) ConvertAudioRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.AudioRequest) (io.Reader, error) {
-	if info.RelayMode == constant.RelayModeAudioTranscription && isQwenASRModel(info.UpstreamModelName) {
-		return a.convertASRRequest(c, info, request)
-	}
 	return nil, errors.New("not implemented")
 }
 
@@ -262,8 +259,6 @@ func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycom
 		return adaptor.DoResponse(c, resp, info)
 	default:
 		switch info.RelayMode {
-		case constant.RelayModeAudioTranscription:
-			usage, err = handleASRResponse(c, resp, info)
 		case constant.RelayModeImagesGenerations:
 			err, usage = aliImageHandler(a, c, resp, info)
 		case constant.RelayModeImagesEdits:
