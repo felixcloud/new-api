@@ -646,14 +646,24 @@ func settleTaskBillingOnComplete(ctx context.Context, adaptor TaskPollingAdaptor
 		logger.LogInfo(ctx, fmt.Sprintf("任务 %s 按次计费，跳过差额结算", task.TaskID))
 		return
 	}
+	// 上游返回的 token 用量：Total 用于计费，Prompt/Completion 落到结算日志的 token 明细。
+	// 上游只给总量（或 completion 反常大于总量）时，全部计入 completion 一侧。
+	usage := TaskTokenUsage{
+		Prompt:     taskResult.TotalTokens - taskResult.CompletionTokens,
+		Completion: taskResult.CompletionTokens,
+		Total:      taskResult.TotalTokens,
+	}
+	if usage.Prompt < 0 {
+		usage.Prompt = 0
+	}
 	// 1. 优先让 adaptor 决定最终额度
 	if actualQuota := adaptor.AdjustBillingOnComplete(task, taskResult); actualQuota > 0 {
-		RecalculateTaskQuota(ctx, task, actualQuota, "adaptor计费调整")
+		RecalculateTaskQuota(ctx, task, actualQuota, usage, "adaptor计费调整")
 		return
 	}
 	// 2. 回退到 token 重算
-	if taskResult.TotalTokens > 0 {
-		RecalculateTaskQuotaByTokens(ctx, task, taskResult.TotalTokens)
+	if usage.Total > 0 {
+		RecalculateTaskQuotaByTokens(ctx, task, usage)
 		return
 	}
 	// 3. 无调整，保持预扣额度

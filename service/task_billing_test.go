@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"math"
 	"net/http"
 	"os"
@@ -787,7 +788,7 @@ func TestRecalculate_PositiveDelta(t *testing.T) {
 
 	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
 
-	RecalculateTaskQuota(ctx, task, actualQuota, "adaptor adjustment")
+	RecalculateTaskQuota(ctx, task, actualQuota, TaskTokenUsage{}, "adaptor adjustment")
 
 	// User quota should decrease by the delta (1000 additional charge)
 	assert.Equal(t, initQuota-(actualQuota-preConsumed), getUserQuota(t, userID))
@@ -826,7 +827,7 @@ func TestRecalculate_NegativeDelta(t *testing.T) {
 
 	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
 
-	RecalculateTaskQuota(ctx, task, actualQuota, "adaptor adjustment")
+	RecalculateTaskQuota(ctx, task, actualQuota, TaskTokenUsage{}, "adaptor adjustment")
 
 	// User quota should increase by abs(delta) = 2000 (refund overpayment)
 	assert.Equal(t, initQuota+(preConsumed-actualQuota), getUserQuota(t, userID))
@@ -860,7 +861,7 @@ func TestRecalculate_ZeroDelta(t *testing.T) {
 
 	task := makeTask(userID, 0, preConsumed, 0, BillingSourceWallet, 0)
 
-	RecalculateTaskQuota(ctx, task, preConsumed, "exact match")
+	RecalculateTaskQuota(ctx, task, preConsumed, TaskTokenUsage{}, "exact match")
 
 	// No change to user quota
 	assert.Equal(t, initQuota, getUserQuota(t, userID))
@@ -880,7 +881,7 @@ func TestRecalculate_ActualQuotaZero(t *testing.T) {
 
 	task := makeTask(userID, 0, 5000, 0, BillingSourceWallet, 0)
 
-	RecalculateTaskQuota(ctx, task, 0, "zero actual")
+	RecalculateTaskQuota(ctx, task, 0, TaskTokenUsage{}, "zero actual")
 
 	// No change (early return)
 	assert.Equal(t, initQuota, getUserQuota(t, userID))
@@ -905,7 +906,7 @@ func TestRecalculate_Subscription_NegativeDelta(t *testing.T) {
 
 	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceSubscription, subID)
 
-	RecalculateTaskQuota(ctx, task, actualQuota, "subscription over-charge")
+	RecalculateTaskQuota(ctx, task, actualQuota, TaskTokenUsage{}, "subscription over-charge")
 
 	// Subscription used should decrease by delta (refund 3000)
 	assert.Equal(t, subUsed-int64(preConsumed-actualQuota), getSubscriptionUsed(t, subID))
@@ -972,7 +973,7 @@ func simulatePollBilling(ctx context.Context, task *model.Task, newStatus model.
 	}
 
 	if shouldSettle && actualQuota > 0 {
-		RecalculateTaskQuota(ctx, task, actualQuota, "test settle")
+		RecalculateTaskQuota(ctx, task, actualQuota, TaskTokenUsage{}, "test settle")
 	}
 	if shouldRefund {
 		RefundTaskQuota(ctx, task, task.FailReason)
@@ -1225,4 +1226,49 @@ func TestSettle_NonPerCallBilling_AppliesAdaptorAdjustment(t *testing.T) {
 	log := getLastLog(t)
 	require.NotNil(t, log)
 	assert.Equal(t, model.LogTypeRefund, log.Type)
+}
+
+// 差额结算日志必须带上上游返回的 token 明细，否则日志页的 Tokens 列会渲染成 "-"。
+// 上游只给总量（Completion 为 0 或反常大于 Total）时，全部计入 completion 一侧。
+func TestSettle_RecordsUpstreamTokenUsageOnLog(t *testing.T) {
+	cases := []struct {
+		name           string
+		completion     int
+		total          int
+		wantPrompt     int
+		wantCompletion int
+	}{
+		{name: "split reported by upstream", completion: 604500, total: 605700, wantPrompt: 1200, wantCompletion: 604500},
+		{name: "total only", completion: 605700, total: 605700, wantPrompt: 0, wantCompletion: 605700},
+		{name: "completion exceeds total", completion: 605700, total: 1000, wantPrompt: 0, wantCompletion: 605700},
+	}
+
+	for i, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			truncate(t)
+			ctx := context.Background()
+
+			userID, tokenID, channelID := 40+i, 40+i, 40+i
+			const initQuota, preConsumed, adaptorQuota, tokenRemain = 10000, 5000, 3000, 8000
+
+			seedUser(t, userID, initQuota)
+			seedToken(t, tokenID, userID, fmt.Sprintf("sk-settle-tokens-%d", i), tokenRemain)
+			seedChannel(t, channelID)
+
+			task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
+			adaptor := &mockAdaptor{adjustReturn: adaptorQuota}
+			taskResult := &relaycommon.TaskInfo{
+				Status:           model.TaskStatusSuccess,
+				CompletionTokens: tc.completion,
+				TotalTokens:      tc.total,
+			}
+
+			settleTaskBillingOnComplete(ctx, adaptor, task, taskResult)
+
+			log := getLastLog(t)
+			require.NotNil(t, log)
+			assert.Equal(t, tc.wantPrompt, log.PromptTokens)
+			assert.Equal(t, tc.wantCompletion, log.CompletionTokens)
+		})
+	}
 }
