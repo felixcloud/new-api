@@ -250,6 +250,31 @@ func TestDoubaoImageSubmission(t *testing.T) {
 // Capability profiles follow the Ark model list: pricing lists only the
 // resolutions each Seedance model offers, reference video input only on
 // Seedance 2.x, and audio output only on Seedance 1.5 pro.
+// The top-level duration must reach Ark like seconds does; otherwise Ark
+// renders its 5s default while the reservation assumed the requested length.
+func TestDoubaoVideoDurationReachesArk(t *testing.T) {
+	_, plugin := newDoubaoPlugin(t)
+	const model = "doubao-seedance-2-5-260628"
+	for _, tc := range []struct {
+		name         string
+		request      map[string]any
+		wantDuration any
+	}{
+		{"top-level duration", map[string]any{"duration": float64(4)}, float64(4)},
+		{"top-level seconds", map[string]any{"seconds": "4"}, float64(4)},
+		{"metadata duration only", map[string]any{"metadata": map[string]any{"resolution": "480p", "duration": float64(4)}}, float64(4)},
+		{"seconds wins over duration", map[string]any{"seconds": "6", "duration": float64(4)}, float64(6)},
+		{"no duration leaves the Ark default", map[string]any{}, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			request := map[string]any{"model": model, "prompt": "a cat", "metadata": map[string]any{"resolution": "480p"}}
+			maps.Copy(request, tc.request)
+			body, _, _ := submitDoubaoImage(t, plugin, "text_to_video", request)
+			assert.Equal(t, tc.wantDuration, body["duration"])
+		})
+	}
+}
+
 func TestDoubaoSeedanceUsageFacts(t *testing.T) {
 	_, plugin := newDoubaoPlugin(t)
 	const (

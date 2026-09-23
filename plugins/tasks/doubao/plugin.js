@@ -246,7 +246,7 @@ export const meta = {
     en: "Volcengine Doubao Seedance video generation and Seedream image generation",
     zh: "火山引擎豆包 Seedance 视频生成与 Seedream 图片生成",
   },
-  version: "1.1.0",
+  version: "1.1.1",
   author: { name: "QuantumNous" },
   channelTypes: [54, 45], // VolcEngine-type channels serve Ark video models with the same wire format
   models: Object.keys(VIDEO_MODELS).concat(Object.keys(IMAGE_MODELS)),
@@ -761,7 +761,9 @@ export function buildSubmitRequest(ctx) {
   const hasReference = body.content.length > 0;
   if (trimmed(req.prompt) || !hasReference) body.content.push({ type: "text", text: req.prompt || "" });
   if (Array.isArray(body.content)) body.content = rewriteDraftTaskContent(body.content, ctx.originTasks);
-  const seconds = Number.parseInt(req.seconds || "", 10);
+  // Top-level seconds or duration override metadata.duration, matching the
+  // order extractUsage reserves quota with; without either, Ark defaults to 5s.
+  const seconds = Number.parseInt(req.seconds || req.duration || "", 10);
   if (seconds > 0) body.duration = seconds;
   body.model = ctx.upstreamModel || body.model;
   return {
