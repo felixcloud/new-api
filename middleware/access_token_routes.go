@@ -204,6 +204,16 @@ var accessTokenRouteRules = map[string]accessTokenRouteRule{
 	"POST /api/plugin/task/:key/dryrun":              accessTokenScopeRule("plugin:write"),
 	"DELETE /api/plugin/task/:key/versions/:version": accessTokenScopeRule("plugin:write"),
 
+	// router/api-router.go: /api/ext(外部业务系统管理扩展接口, 签名 + RootAuth)。
+	// 业务系统在 root 名下建一个带这几个范围的访问令牌, 旧的单个访问令牌升级后 30 天停用。
+	"GET /api/ext/version":    accessTokenAnyRule,
+	"PUT /api/ext/user":       accessTokenScopeRule("user:write"),
+	"GET /api/ext/users":      accessTokenScopeRule("user:read"),
+	"PUT /api/ext/token":      accessTokenScopeRule("api_key:write"),
+	"DELETE /api/ext/token":   accessTokenScopeRule("api_key:write"),
+	"GET /api/ext/logs":       accessTokenScopeRule("log:read"),
+	"GET /api/ext/logs/stats": accessTokenScopeRule("log:read"),
+
 	// router/channel-router.go: the key route is RootAuth, not Casbin-guarded.
 	"POST /api/channel/:id/key": accessTokenScopeRule(service.AccessTokenScopeOf(authz.ChannelSecretView)),
 
