@@ -320,6 +320,10 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 				info.PriceData.AddOtherRatio(k, v)
 			}
 		}
+		// yunai fork: 外部业务系统按插件的计费事实计价, 倍率计费路径下也取一份写进日志; 取不到不影响请求
+		if provider, ok := adaptor.(channel.TaskUsageFactsProvider); ok {
+			info.TaskUsageFacts = provider.ExtractUsageFacts(c, info)
+		}
 	}
 
 	// 6. 将 OtherRatios 应用到基础额度（饱和转换，防止溢出成负数）

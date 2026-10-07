@@ -1115,8 +1115,12 @@ func TestRecalculate_ZeroDelta(t *testing.T) {
 	// No change to user quota
 	assert.Equal(t, initQuota, getUserQuota(t, userID))
 
-	// No log created (delta is zero)
-	assert.Equal(t, int64(0), countLogs(t))
+	// yunai fork: 差额为 0 也写一条 0 额度的结算日志(外部业务系统以结算日志计价)
+	assert.Equal(t, int64(1), countLogs(t))
+	log := getLastLog(t)
+	assert.Equal(t, model.LogTypeConsume, log.Type)
+	assert.Equal(t, 0, log.Quota)
+	assert.Contains(t, log.Other, `"task_settled":true`)
 }
 
 func TestRecalculate_ActualQuotaZero(t *testing.T) {

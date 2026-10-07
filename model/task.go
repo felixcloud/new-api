@@ -169,6 +169,8 @@ type TaskBillingContext struct {
 	OriginModelName string                       `json:"origin_model_name,omitempty"` // 模型名称，必须为OriginModelName
 	PerCallBilling  bool                         `json:"per_call_billing,omitempty"`  // 按次计费：跳过轮询阶段的差额结算
 	TieredSnapshot  *billingexpr.BillingSnapshot `json:"tiered_snapshot,omitempty"`
+	// UsageFacts(yunai fork): 倍率计费路径下的插件计费事实, 提交时为估算, 完成时合并实际值, 写进结算日志
+	UsageFacts map[string]any `json:"usage_facts,omitempty"`
 }
 
 // ResultRetrievable reports whether retrieval surfaces (native query routes,

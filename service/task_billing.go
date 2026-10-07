@@ -75,6 +75,13 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo, task *model
 		setTaskImageCount(other, snap.UsageFacts["image_count"])
 	} else {
 		setTaskImageCount(other, info.PriceData.OtherRatios()["image_count"])
+		if len(info.TaskUsageFacts) > 0 {
+			other.SetPublic("usage_facts", info.TaskUsageFacts)
+		}
+	}
+	// yunai fork: 异步任务的提交日志只是预扣, 最终用量看完成时那条 task_settled 的结算日志
+	if !taskDeliveredInline(c, task) {
+		other.SetPublic("task_pending", true)
 	}
 	appendTaskLogInfo(task, other)
 	attachQuotaSaturation(c, info, other)
@@ -168,8 +175,13 @@ func taskBillingOther(task *model.Task) *model.LogOther {
 				other.SetPublic("usage_facts", snap.UsageFacts)
 			}
 			setTaskImageCount(other, snap.UsageFacts["image_count"])
-		} else if priceData := taskBillingContextPriceData(bc); priceData != nil {
-			setTaskImageCount(other, priceData.OtherRatios()["image_count"])
+		} else {
+			if priceData := taskBillingContextPriceData(bc); priceData != nil {
+				setTaskImageCount(other, priceData.OtherRatios()["image_count"])
+			}
+			if len(bc.UsageFacts) > 0 {
+				other.SetPublic("usage_facts", bc.UsageFacts)
+			}
 		}
 	}
 	props := task.Properties
@@ -316,6 +328,8 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 	if quotaDelta == 0 {
 		logger.LogInfo(ctx, fmt.Sprintf("任务 %s 预扣费准确（%s，%s）",
 			task.TaskID, logger.LogQuota(actualQuota), reason))
+		// yunai fork: 外部业务系统以结算日志为准计价, 差额为 0 也要留一条 0 额度的结算日志
+		recordTaskSettlementLog(task, model.LogTypeConsume, 0, preConsumedQuota, actualQuota, reason, clamps...)
 		return
 	}
 
@@ -345,19 +359,20 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 	model.UpdateUserUsedQuota(task.UserId, quotaDelta)
 	model.UpdateChannelUsedQuota(task.ChannelId, quotaDelta)
 
-	var logType int
-	var logQuota int
 	if quotaDelta > 0 {
-		logType = model.LogTypeConsume
-		logQuota = quotaDelta
+		recordTaskSettlementLog(task, model.LogTypeConsume, quotaDelta, preConsumedQuota, actualQuota, reason, clamps...)
 	} else {
-		logType = model.LogTypeRefund
-		logQuota = -quotaDelta
+		recordTaskSettlementLog(task, model.LogTypeRefund, -quotaDelta, preConsumedQuota, actualQuota, reason, clamps...)
 	}
+}
+
+// recordTaskSettlementLog 写任务结算日志; yunai fork 加 task_settled 标记, 外部业务系统据此按最终用量计价
+func recordTaskSettlementLog(task *model.Task, logType int, logQuota int, preConsumedQuota int, actualQuota int, reason string, clamps ...*common.QuotaClamp) {
 	other := taskBillingOther(task)
 	other.SetPublic("task_id", task.TaskID)
 	other.SetPublic("pre_consumed_quota", preConsumedQuota)
 	other.SetPublic("actual_quota", actualQuota)
+	other.SetPublic("task_settled", true)
 	for _, clamp := range clamps {
 		attachQuotaSaturationToOther(other, clamp)
 	}

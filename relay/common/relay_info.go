@@ -176,8 +176,11 @@ type RelayInfo struct {
 	// Auto-group retries refresh its group-dependent fields before each attempt
 	// and again before settlement. Non-nil only when billing mode is "tiered_expr".
 	TieredBillingSnapshot *billingexpr.BillingSnapshot
-	BillingRequestInput   *billingexpr.RequestInput
-	BillingImageCount     *int
+	// TaskUsageFacts(yunai fork): 倍率计费路径下插件给出的计费事实(估算 Token、分辨率、是否带参考视频 …),
+	// 只写进日志供外部业务系统计价, 不参与 new-api 自己的额度计算
+	TaskUsageFacts      map[string]any
+	BillingRequestInput *billingexpr.RequestInput
+	BillingImageCount   *int
 	// ImageRequestCount is the effective quantity sent on the current attempt;
 	// ImageQuotaBeforeGroup is the frozen legacy estimate before request ratios.
 	ImageRequestCount     int

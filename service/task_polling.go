@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"sort"
 	"strings"
@@ -671,6 +672,22 @@ func truncateBase64(s string) string {
 //
 // 表达式求值失败会保留预扣额度，因此也视为已接管，避免错误全退。
 func settleTaskBillingOnComplete(ctx context.Context, adaptor TaskPollingAdaptor, task *model.Task, taskResult *relaycommon.TaskInfo) bool {
+	// yunai fork: 倍率计费路径把完成时的实际事实(实际 Token、分辨率 …)合并进计费上下文, 结算日志据此写 usage_facts
+	if bc := task.PrivateData.BillingContext; bc != nil && bc.TieredSnapshot == nil && task.Status == model.TaskStatusSuccess && taskResult != nil && len(taskResult.UsageFacts) > 0 {
+		merged := make(map[string]any, len(bc.UsageFacts)+len(taskResult.UsageFacts))
+		maps.Copy(merged, bc.UsageFacts)
+		maps.Copy(merged, taskResult.UsageFacts)
+		bc.UsageFacts = merged
+	}
+	settled := settleTaskBillingCore(ctx, adaptor, task, taskResult)
+	// yunai fork: 成功任务没走差额结算(按次计费 / 上游没回 Token / 没配倍率)时也补一条 0 额度的结算日志, 外部业务系统以它计价
+	if !settled && task.Status == model.TaskStatusSuccess {
+		RecalculateTaskQuota(ctx, task, task.Quota, "任务完成结算")
+	}
+	return settled
+}
+
+func settleTaskBillingCore(ctx context.Context, adaptor TaskPollingAdaptor, task *model.Task, taskResult *relaycommon.TaskInfo) bool {
 	if bc := task.PrivateData.BillingContext; bc != nil && bc.TieredSnapshot != nil {
 		// 用量表达式结算只适用于成功任务；失败任务由调用方全额退款。
 		if task.Status == model.TaskStatusFailure {
