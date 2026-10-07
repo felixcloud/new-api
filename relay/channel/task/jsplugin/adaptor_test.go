@@ -1017,6 +1017,68 @@ export function extractUsageOnComplete() { return {units: 3.5}; }
 	})
 }
 
+// yunai: Seedance 智能时长 metadata.duration=-1 —— 时长没声明成计费事实的插件放行 -1, 别的负数与钩子事实照旧拒绝
+func TestTaskAdaptorAcceptsUndeclaredAutoDurationSentinel(t *testing.T) {
+	source := `
+export const meta = {
+  apiVersion: 1, key: "auto-duration", name: "Auto Duration", version: "1.0.0",
+  author: {name: "Test"},
+  models: ["model"], fetchMode: "per_task",
+  usageSchema: {tokens: {type: "number", unit: "token"}},
+  usageExamples: [{label: "1 token", facts: {tokens: 1}}],
+};
+export function buildSubmitRequest(ctx) {
+  return {url: ctx.baseUrl + "/submit", method: "POST", body: {}};
+}
+export function parseSubmitResponse() { return {taskId: "1"}; }
+export function buildQueryRequest() { return {url: "https://example.com"}; }
+export function parseTaskResult() { return {status: "SUCCESS"}; }
+export function extractUsage(ctx) {
+  const metadata = (ctx.requestBody || {}).metadata || {};
+  return metadata.echo ? {duration: metadata.duration} : {tokens: 324000};
+}
+`
+	plugin, err := pluginruntime.NewRegistry().Register(source, pluginruntime.Options{})
+	require.NoError(t, err)
+
+	newRequest := func(t *testing.T, metadata map[string]any) (*TaskAdaptor, *gin.Context, *relaycommon.RelayInfo) {
+		t.Helper()
+		adaptor := New(plugin)
+		info := &relaycommon.RelayInfo{
+			ChannelMeta:   &relaycommon.ChannelMeta{ChannelBaseUrl: "https://provider.example"},
+			TaskRelayInfo: &relaycommon.TaskRelayInfo{},
+		}
+		adaptor.Init(info)
+		context, _ := gin.CreateTestContext(httptest.NewRecorder())
+		context.Request = httptest.NewRequest(http.MethodPost, "/v1/video/generations", nil)
+		context.Set("task_request", map[string]any{"model": "model", "prompt": "a lake", "metadata": metadata})
+		return adaptor, context, info
+	}
+
+	for _, value := range []any{-1, -1.0, "-1"} {
+		adaptor, context, info := newRequest(t, map[string]any{"duration": value, "resolution": "720p"})
+		require.Nil(t, adaptor.ValidateRequestAndSetAction(context, info), "duration %v", value)
+		ratios, err := adaptor.EstimateBillingValidated(context, info)
+		require.NoError(t, err)
+		assert.Equal(t, 324000.0, ratios["tokens"])
+	}
+
+	for _, value := range []any{-2, -0.5, math.Inf(-1)} {
+		adaptor, context, info := newRequest(t, map[string]any{"duration": value})
+		taskErr := adaptor.ValidateRequestAndSetAction(context, info)
+		require.NotNil(t, taskErr, "duration %v", value)
+		assert.Equal(t, "plugin_usage_invalid", taskErr.Code)
+	}
+
+	t.Run("sentinel echoed back as a usage fact is still rejected", func(t *testing.T) {
+		adaptor, context, info := newRequest(t, map[string]any{"duration": -1, "echo": true})
+		require.Nil(t, adaptor.ValidateRequestAndSetAction(context, info))
+		ratios, err := adaptor.EstimateBillingValidated(context, info)
+		require.Error(t, err)
+		assert.Nil(t, ratios)
+	})
+}
+
 func TestTaskAdaptorSeparatesExpressionFactsFromLegacyBillingRatios(t *testing.T) {
 	source := `
 export const meta = {

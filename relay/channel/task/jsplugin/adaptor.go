@@ -1433,7 +1433,10 @@ func (a *TaskAdaptor) validateResolvedUsageValue(value any, usageSchema map[stri
 					return err
 				}
 			} else if limit, canonical := canonicalUsageLimit(key); canonical {
-				if err := validateUsageLimit(item, limit, true); err != nil {
+				if autoDurationSentinel(key, item) {
+					// yunai: 方舟 Seedance 的 duration=-1 是「智能时长」(模型自选时长), 原样发给上游;
+					// 时长没声明成计费事实, 不进乘数, 插件估算与结算各自返回的事实仍按上限校验
+				} else if err := validateUsageLimit(item, limit, true); err != nil {
 					return err
 				}
 			}
@@ -1623,6 +1626,18 @@ func usageNumber(value any, allowNumericString bool) (float64, bool) {
 	default:
 		return 0, false
 	}
+}
+
+// autoDurationSentinel reports a vendor "let the model choose" duration (-1)
+// on an undeclared duration key; declared usage fields never take this path.
+func autoDurationSentinel(key string, value any) bool {
+	switch strings.NewReplacer("_", "", "-", "").Replace(strings.ToLower(key)) {
+	case "duration", "durationseconds", "second", "seconds":
+	default:
+		return false
+	}
+	number, ok := usageNumber(value, true)
+	return ok && number == -1
 }
 
 func canonicalUsageLimit(key string) (int, bool) {
