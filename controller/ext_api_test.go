@@ -101,6 +101,7 @@ func extTestRouter() *gin.Engine {
 	group.DELETE("/token", ExtDeleteToken)
 	group.GET("/logs", ExtListLogs)
 	group.GET("/logs/stats", ExtLogStats)
+	group.GET("/channels/digest", ExtChannelDigest)
 	return router
 }
 
@@ -162,7 +163,7 @@ func TestExtSignatureGateAndVersion(t *testing.T) {
 	}
 	require.NoError(t, common.Unmarshal(response.Data, &version))
 	assert.Equal(t, common.Version, version.Version)
-	assert.Equal(t, "1", version.ExtVersion)
+	assert.Equal(t, "2", version.ExtVersion)
 	assert.Len(t, version.InstanceId, 32)
 
 	// 标识已落库，且清空内存后再次调用仍返回同一个值。
@@ -381,4 +382,47 @@ func TestExtLogsCursorAndHourlyStats(t *testing.T) {
 			assert.Equal(t, http.StatusBadRequest, recorder.Code)
 		})
 	}
+}
+
+// 渠道摘要：只给密钥的 SHA-256 与个数，响应里不出现密钥本身；备注原样带回（业务系统的认领标记）。
+func TestExtChannelDigest(t *testing.T) {
+	extTestDB(t, "sqlite", "")
+	require.NoError(t, model.DB.AutoMigrate(&model.Channel{}))
+	t.Setenv("MAAS_EXT_SECRET", extTestSecret)
+	router := extTestRouter()
+
+	remark := "yunai:CH001"
+	single := &model.Channel{Type: 1, Key: "sk-upstream-single", Name: "single", Remark: &remark}
+	multi := &model.Channel{Type: 1, Key: "key-a\nkey-b\nkey-c", Name: "multi"}
+	require.NoError(t, model.DB.Create(single).Error)
+	require.NoError(t, model.DB.Create(multi).Error)
+
+	recorder, response := extSignedRequest(t, router, extTestSecret, 0, http.MethodGet, "/api/ext/channels/digest", nil)
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.True(t, response.Success, response.Message)
+	assert.NotContains(t, recorder.Body.String(), "sk-upstream-single")
+	assert.NotContains(t, recorder.Body.String(), "key-b")
+
+	var payload struct {
+		Items []struct {
+			Id        int    `json:"id"`
+			Remark    string `json:"remark"`
+			KeySha256 string `json:"key_sha256"`
+			KeyCount  int    `json:"key_count"`
+		} `json:"items"`
+	}
+	require.NoError(t, common.Unmarshal(response.Data, &payload))
+	require.Len(t, payload.Items, 2)
+	byId := map[int]int{}
+	for i, item := range payload.Items {
+		byId[item.Id] = i
+	}
+	first := payload.Items[byId[single.Id]]
+	sum := sha256.Sum256([]byte("sk-upstream-single"))
+	assert.Equal(t, hex.EncodeToString(sum[:]), first.KeySha256)
+	assert.Equal(t, "yunai:CH001", first.Remark)
+	assert.Equal(t, 1, first.KeyCount)
+	second := payload.Items[byId[multi.Id]]
+	assert.Equal(t, "", second.Remark)
+	assert.Equal(t, 3, second.KeyCount)
 }

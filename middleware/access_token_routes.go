@@ -213,6 +213,8 @@ var accessTokenRouteRules = map[string]accessTokenRouteRule{
 	"DELETE /api/ext/token":   accessTokenScopeRule("api_key:write"),
 	"GET /api/ext/logs":       accessTokenScopeRule("log:read"),
 	"GET /api/ext/logs/stats": accessTokenScopeRule("log:read"),
+	// 只有密钥摘要, 不含密钥; 与原生渠道列表同一个范围。
+	"GET /api/ext/channels/digest": accessTokenScopeRule("channel:read"),
 
 	// router/channel-router.go: the key route is RootAuth, not Casbin-guarded.
 	"POST /api/channel/:id/key": accessTokenScopeRule(service.AccessTokenScopeOf(authz.ChannelSecretView)),

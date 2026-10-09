@@ -1,6 +1,8 @@
 package controller
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/http"
@@ -21,8 +23,9 @@ import (
 // ExtSignature + RootAuth 两层中间件。
 
 const (
-	// extVersion 是扩展接口契约版本，接口形状不兼容变更时递增。
-	extVersion = "1"
+	// extVersion 是扩展接口契约版本，接口形状变更时递增。
+	// 2：加 GET /api/ext/channels/digest（业务系统统一下发渠道后发现密钥被改）。
+	extVersion = "2"
 	// extUsersQueryLimit 是 GET /api/ext/users 一次最多接受的用户名个数。
 	extUsersQueryLimit = 500
 	// extLogsDefaultLimit / extLogsMaxLimit 是日志游标拉取的缺省与上限条数。
@@ -356,6 +359,31 @@ func ExtLogStats(c *gin.Context) {
 		return
 	}
 	common.ApiSuccess(c, stats)
+}
+
+// ExtChannelDigest 返回全部渠道的 id、备注与密钥摘要（SHA-256 十六进制）与密钥个数，不返回密钥本身。
+// 原生渠道列表不带密钥，业务系统统一下发渠道后靠它发现密钥在控制台被改；备注里有业务系统写的认领标记。
+func ExtChannelDigest(c *gin.Context) {
+	channels, err := model.GetAllChannels(0, 0, true, true)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	items := make([]gin.H, 0, len(channels))
+	for _, channel := range channels {
+		sum := sha256.Sum256([]byte(channel.Key))
+		remark := ""
+		if channel.Remark != nil {
+			remark = *channel.Remark
+		}
+		items = append(items, gin.H{
+			"id":         channel.Id,
+			"remark":     remark,
+			"key_sha256": hex.EncodeToString(sum[:]),
+			"key_count":  len(channel.GetKeys()),
+		})
+	}
+	common.ApiSuccess(c, gin.H{"items": items})
 }
 
 // ExtVersion 返回程序版本、扩展接口契约版本与本实例的持久化随机标识，

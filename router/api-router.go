@@ -357,6 +357,7 @@ func SetApiRouter(router *gin.Engine) {
 			extRouter.DELETE("/token", controller.ExtDeleteToken)
 			extRouter.GET("/logs", controller.ExtListLogs)
 			extRouter.GET("/logs/stats", controller.ExtLogStats)
+			extRouter.GET("/channels/digest", controller.ExtChannelDigest)
 		}
 
 		dataRoute := apiRouter.Group("/data")
