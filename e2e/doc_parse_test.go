@@ -11,12 +11,13 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/controller"
-	"github.com/QuantumNous/new-api/relaykit/dto"
+	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/relay"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/gin-gonic/gin"
@@ -38,12 +39,20 @@ export function buildContentRequest(ctx){const item=(ctx.data.artifacts||[]).fin
 
 func TestDocumentPluginRunsGenericBatchArtifactChain(t *testing.T) {
 	service.InitHttpClient()
-	originalDB := model.DB
+	originalDB, originalLogDB := model.DB, model.LOG_DB
+	originalRedis, originalLogConsume := common.RedisEnabled, common.LogConsumeEnabled
+	common.RedisEnabled, common.LogConsumeEnabled = false, true
+	require.NoError(t, i18n.Init())
 	database, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, database.AutoMigrate(&model.TaskPlugin{}, &model.Channel{}, &model.Task{}))
-	model.DB = database
-	t.Cleanup(func() { model.DB = originalDB; jsplugin.DefaultRegistry.Unregister("doc-parse") })
+	require.NoError(t, database.AutoMigrate(&model.TaskPlugin{}, &model.Channel{}, &model.Task{}, &model.User{}, &model.Log{}))
+	model.DB, model.LOG_DB = database, database
+	require.NoError(t, database.Create(&model.User{Id: 7, Username: "document-user", Status: common.UserStatusEnabled}).Error)
+	t.Cleanup(func() {
+		model.DB, model.LOG_DB = originalDB, originalLogDB
+		common.RedisEnabled, common.LogConsumeEnabled = originalRedis, originalLogConsume
+		jsplugin.DefaultRegistry.Unregister("doc-parse")
+	})
 
 	source := docParsePluginSource
 	uploadBody, err := common.Marshal(map[string]any{"source": source, "remark": "phase 4 acceptance"})
@@ -118,6 +127,13 @@ func TestDocumentPluginRunsGenericBatchArtifactChain(t *testing.T) {
 	service.DispatchPlatformUpdate(context.Background(), "doc-parse", map[int][]string{channel.Id: {parsed.UpstreamTaskID}}, map[string]*model.Task{parsed.UpstreamTaskID: &task})
 	require.NoError(t, database.First(&task, task.ID).Error)
 	assert.Equal(t, model.TaskStatus(model.TaskStatusSuccess), task.Status)
+	var settlement model.Log
+	require.NoError(t, database.Where("user_id = ? AND type = ?", 7, model.LogTypeConsume).First(&settlement).Error)
+	assert.Zero(t, settlement.Quota)
+	var other map[string]any
+	require.NoError(t, common.UnmarshalJsonStr(settlement.Other, &other))
+	assert.Equal(t, true, other["task_settled"])
+	assert.Equal(t, task.TaskID, other["task_id"])
 
 	queryRecorder := httptest.NewRecorder()
 	queryContext, _ := gin.CreateTestContext(queryRecorder)

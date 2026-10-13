@@ -814,8 +814,9 @@ export function buildSubmitRequest(ctx) {
   const hasReference = body.content.length > 0;
   if (trimmed(req.prompt) || !hasReference) body.content.push({ type: "text", text: req.prompt || "" });
   if (Array.isArray(body.content)) body.content = rewriteDraftTaskContent(body.content, ctx.originTasks);
+  // Top-level seconds or duration override metadata.duration.
   // -1 lets the model pick the length; extractUsage reserves the longest one.
-  const seconds = Number.parseInt(req.seconds || "", 10);
+  const seconds = Number.parseInt(req.seconds || req.duration || "", 10);
   if (seconds > 0 || seconds === -1) body.duration = seconds;
   body.model = ctx.upstreamModel || body.model;
   return {
