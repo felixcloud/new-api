@@ -29,9 +29,9 @@ var ModelList = []string{
 	"qwq-32b",
 	"qwen3-235b-a22b",
 	"qwen-audio-3.0-asr-flash",
-    "fun-asr-flash-2026-06-15",
-    "qwen3-asr-flash",
-    "qwen3-asr-flash-us",
+	"fun-asr-flash-2026-06-15",
+	"qwen3-asr-flash",
+	"qwen3-asr-flash-us",
 	"text-embedding-v1",
 	"gte-rerank-v2",
 }

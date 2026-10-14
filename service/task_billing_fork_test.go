@@ -27,7 +27,7 @@ func TestSettle_ForkMergesUsageFactsIntoSettlementLog(t *testing.T) {
 	task.PrivateData.BillingContext.UsageFacts = map[string]any{"tokens": float64(9000), "resolution": "720p", "video_input": "video"}
 
 	taskResult := &relaycommon.TaskInfo{Status: model.TaskStatusSuccess, UsageFacts: map[string]any{"tokens": float64(50638), "resolution": "480p"}}
-	settled := settleTaskBillingOnComplete(ctx, &mockAdaptor{}, task, taskResult)
+	settled := forkSettleTaskBillingOnComplete(ctx, &mockAdaptor{}, task, taskResult)
 
 	assert.False(t, settled)
 	assert.Equal(t, initQuota, getUserQuota(t, userID), "按次计费不做差额结算")
@@ -54,7 +54,7 @@ func TestSettle_ForkFailureKeepsRefundOnly(t *testing.T) {
 	task.Status = model.TaskStatusFailure
 	task.PrivateData.BillingContext.UsageFacts = map[string]any{"tokens": float64(9000)}
 
-	settled := settleTaskBillingOnComplete(ctx, &mockAdaptor{}, task, &relaycommon.TaskInfo{Status: model.TaskStatusFailure})
+	settled := forkSettleTaskBillingOnComplete(ctx, &mockAdaptor{}, task, &relaycommon.TaskInfo{Status: model.TaskStatusFailure})
 	assert.False(t, settled)
 	assert.Equal(t, int64(0), countLogs(t), "失败任务由调用方 RefundTaskQuota 退款, 结算阶段不写日志")
 }
