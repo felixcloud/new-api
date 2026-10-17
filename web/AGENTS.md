@@ -62,7 +62,7 @@
   - **非 React 环境**（工具函数、常量、类方法）：可使用 `import { t } from 'i18next'`；此类用法不会随语言切换自动更新，仅在不依赖响应式更新的场景使用。
   - 即使父组件已使用 `useTranslation()`，子组件仍应自行使用，以保证独立性。
 - **专有名词**：品牌、产品、技术术语等可保留英文（如 API、React、TypeScript）；若有约定俗成的译法则使用翻译。
-- **翻译键**：使用有层级、语义清晰的键名，如 `dashboard.overview.title`，并保持命名一致。
+- **翻译键**：使用英文原文字符串作为键（如 `Dashboard overview`），各语言的 `translation` 对象内保持扁平键值，与根 `AGENTS.md` 及现有 locale 文件一致；不要新增 `dashboard.overview.title` 这类层级键。
 
 - **枚举与文案（常量中的 i18n）**
   各 feature 的 `constants.ts` 中常出现「枚举/状态 + 展示文案」或「成功/错误消息」，须统一约定以免遗漏 i18n、用法混乱：
