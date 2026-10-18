@@ -21,5 +21,6 @@ func setExtRouter(apiRouter *gin.RouterGroup) {
 		extRouter.GET("/logs", controller.ExtListLogs)
 		extRouter.GET("/logs/stats", controller.ExtLogStats)
 		extRouter.GET("/channels/digest", controller.ExtChannelDigest)
+		extRouter.PUT("/channel/group-policy", controller.ExtPutChannelGroupPolicy)
 	}
 }

@@ -380,6 +380,9 @@ func migrateDB() error {
 	if err != nil {
 		return err
 	}
+	if err := forkMigrateChannelGroupPolicy(); err != nil { // yunai fork
+		return err
+	}
 	if err := InitializeUserAuthVersions(); err != nil {
 		return err
 	}

@@ -102,6 +102,7 @@ func extTestRouter() *gin.Engine {
 	group.GET("/logs", ExtListLogs)
 	group.GET("/logs/stats", ExtLogStats)
 	group.GET("/channels/digest", ExtChannelDigest)
+	group.PUT("/channel/group-policy", ExtPutChannelGroupPolicy)
 	return router
 }
 
@@ -163,7 +164,7 @@ func TestExtSignatureGateAndVersion(t *testing.T) {
 	}
 	require.NoError(t, common.Unmarshal(response.Data, &version))
 	assert.Equal(t, common.Version, version.Version)
-	assert.Equal(t, "2", version.ExtVersion)
+	assert.Equal(t, "3", version.ExtVersion)
 	assert.Len(t, version.InstanceId, 32)
 
 	// 标识已落库，且清空内存后再次调用仍返回同一个值。
@@ -387,7 +388,7 @@ func TestExtLogsCursorAndHourlyStats(t *testing.T) {
 // 渠道摘要：只给密钥的 SHA-256 与个数，响应里不出现密钥本身；备注原样带回（业务系统的认领标记）。
 func TestExtChannelDigest(t *testing.T) {
 	extTestDB(t, "sqlite", "")
-	require.NoError(t, model.DB.AutoMigrate(&model.Channel{}))
+	require.NoError(t, model.DB.AutoMigrate(&model.Channel{}, &model.ChannelGroupPolicy{})) // yunai fork: digest 读策略表
 	t.Setenv("MAAS_EXT_SECRET", extTestSecret)
 	router := extTestRouter()
 
@@ -425,4 +426,49 @@ func TestExtChannelDigest(t *testing.T) {
 	second := payload.Items[byId[multi.Id]]
 	assert.Equal(t, "", second.Remark)
 	assert.Equal(t, 3, second.KeyCount)
+}
+
+func TestExtChannelGroupPolicy(t *testing.T) {
+	extTestDB(t, "sqlite", "")
+	require.NoError(t, model.DB.AutoMigrate(&model.Channel{}, &model.Ability{}, &model.ChannelGroupPolicy{}))
+	t.Setenv("MAAS_EXT_SECRET", extTestSecret)
+	router := extTestRouter()
+
+	remark := "yunai:CH0001"
+	channel := &model.Channel{Type: 1, Key: "sk-x", Name: "c", Models: "m1", Group: "ent,vip", Status: common.ChannelStatusEnabled, Remark: &remark}
+	require.NoError(t, channel.Insert())
+
+	body := map[string]any{"channel_id": channel.Id, "policies": []map[string]any{
+		{"group": "vip", "priority": 80, "weight": 2}, {"group": "ent", "priority": 100, "weight": 5}}}
+	recorder, response := extSignedRequest(t, router, extTestSecret, 0, http.MethodPut, "/api/ext/channel/group-policy", body)
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.True(t, response.Success, response.Message)
+	want := model.ChannelGroupPolicyDigest([]model.ChannelGroupPolicy{{Group: "ent", Priority: 100, Weight: 5}, {Group: "vip", Priority: 80, Weight: 2}})
+	assert.Contains(t, string(response.Data), want)
+
+	var ab model.Ability
+	require.NoError(t, model.DB.Where("channel_id = ? and model = ? and `group` = ?", channel.Id, "m1", "vip").First(&ab).Error)
+	assert.Equal(t, int64(80), *ab.Priority)
+	assert.Equal(t, uint(2), ab.Weight)
+
+	_, digest := extSignedRequest(t, router, extTestSecret, 0, http.MethodGet, "/api/ext/channels/digest", nil)
+	assert.Contains(t, string(digest.Data), want)
+
+	// 校验：重复分组、超权重、渠道不存在
+	_, bad := extSignedRequest(t, router, extTestSecret, 0, http.MethodPut, "/api/ext/channel/group-policy",
+		map[string]any{"channel_id": channel.Id, "policies": []map[string]any{{"group": "a", "weight": 1}, {"group": "a", "weight": 1}}})
+	assert.False(t, bad.Success)
+	_, bad = extSignedRequest(t, router, extTestSecret, 0, http.MethodPut, "/api/ext/channel/group-policy",
+		map[string]any{"channel_id": channel.Id, "policies": []map[string]any{{"group": "a", "weight": 10001}}})
+	assert.False(t, bad.Success)
+	notFound, _ := extSignedRequest(t, router, extTestSecret, 0, http.MethodPut, "/api/ext/channel/group-policy",
+		map[string]any{"channel_id": 99999, "policies": []map[string]any{}})
+	assert.Equal(t, http.StatusNotFound, notFound.Code)
+
+	// 清空策略：abilities 回到渠道值
+	_, cleared := extSignedRequest(t, router, extTestSecret, 0, http.MethodPut, "/api/ext/channel/group-policy",
+		map[string]any{"channel_id": channel.Id, "policies": []map[string]any{}})
+	require.True(t, cleared.Success, cleared.Message)
+	require.NoError(t, model.DB.Where("channel_id = ? and model = ? and `group` = ?", channel.Id, "m1", "vip").First(&ab).Error)
+	assert.Equal(t, uint(0), ab.Weight)
 }

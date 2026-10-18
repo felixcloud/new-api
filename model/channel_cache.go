@@ -78,7 +78,9 @@ func InitChannelCache() {
 		}
 	}
 
+	newGroupPolicyCache := forkLoadGroupPolicyCache() // yunai fork
 	channelSyncLock.Lock()
+	channelGroupPolicyCache = newGroupPolicyCache // yunai fork
 	group2model2channels = newGroup2model2channels
 	//channelsIDM = newChannelId2channel
 	for i, channel := range newChannelId2channel {
@@ -146,6 +148,9 @@ func GetRandomSatisfiedChannel(
 			return channel, nil
 		}
 		return nil, fmt.Errorf("database consistency error: channel #%d does not exist, please contact the administrator", channels[0])
+	}
+	if channel, handled, err := forkSelectByGroupPolicy(group, channels, retry); handled { // yunai fork
+		return channel, err
 	}
 
 	uniquePriorities := make(map[int]bool)

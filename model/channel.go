@@ -631,6 +631,7 @@ func (channel *Channel) Delete() error {
 		return err
 	}
 	err = channel.DeleteAbilities()
+	forkDeleteGroupPoliciesQuiet(channel.Id) // yunai fork
 	return err
 }
 

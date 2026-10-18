@@ -25,7 +25,13 @@ import (
 const (
 	// extVersion 是扩展接口契约版本，接口形状变更时递增。
 	// 2：加 GET /api/ext/channels/digest（业务系统统一下发渠道后发现密钥被改）。
-	extVersion = "2"
+	// 3：加 PUT /api/ext/channel/group-policy（渠道的分组级优先级 / 权重），digest 加 group_policy_sha256，
+	//    version 加 memory_cache_enabled。
+	extVersion = "3"
+	// extGroupPolicyMaxItems 是一条渠道最多的分组策略条数（channels.group 是 varchar(64)，挂不了更多）。
+	extGroupPolicyMaxItems = 32
+	// extGroupPolicyMaxWeight 与业务系统的权重上限一致。
+	extGroupPolicyMaxWeight = 10000
 	// extUsersQueryLimit 是 GET /api/ext/users 一次最多接受的用户名个数。
 	extUsersQueryLimit = 500
 	// extLogsDefaultLimit / extLogsMaxLimit 是日志游标拉取的缺省与上限条数。
@@ -369,6 +375,11 @@ func ExtChannelDigest(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	policyDigests, err := model.ChannelGroupPolicyDigests()
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	items := make([]gin.H, 0, len(channels))
 	for _, channel := range channels {
 		sum := sha256.Sum256([]byte(channel.Key))
@@ -381,6 +392,8 @@ func ExtChannelDigest(c *gin.Context) {
 			"remark":     remark,
 			"key_sha256": hex.EncodeToString(sum[:]),
 			"key_count":  len(channel.GetKeys()),
+			// 分组策略摘要（口径见 model.ChannelGroupPolicyDigest），没有策略为空串
+			"group_policy_sha256": policyDigests[channel.Id],
 		})
 	}
 	common.ApiSuccess(c, gin.H{"items": items})
@@ -394,5 +407,65 @@ func ExtVersion(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	common.ApiSuccess(c, gin.H{"version": common.Version, "ext_version": extVersion, "instance_id": instanceId})
+	common.ApiSuccess(c, gin.H{"version": common.Version, "ext_version": extVersion, "instance_id": instanceId,
+		"memory_cache_enabled": common.MemoryCacheEnabled})
+}
+
+type extGroupPolicyItem struct {
+	Group    string `json:"group"`
+	Priority int64  `json:"priority"`
+	Weight   uint   `json:"weight"`
+}
+
+type extGroupPolicyRequest struct {
+	ChannelId int                  `json:"channel_id"`
+	Policies  []extGroupPolicyItem `json:"policies"`
+}
+
+// ExtPutChannelGroupPolicy 整组替换一条渠道的分组策略（空列表 = 清掉，回到渠道自身的优先级 / 权重），
+// 同时重建该渠道的 abilities 并刷新本实例缓存；多实例部署其余节点靠 SYNC_FREQUENCY 同步。
+// 策略可以先于渠道的 group 列写入：分组不在 group 列时策略不参与选路，等渠道改了 group 才生效。
+func ExtPutChannelGroupPolicy(c *gin.Context) {
+	var req extGroupPolicyRequest
+	if err := common.DecodeJson(c.Request.Body, &req); err != nil {
+		extFail(c, http.StatusBadRequest, "请求体不是合法 JSON")
+		return
+	}
+	if req.ChannelId <= 0 {
+		extFail(c, http.StatusBadRequest, "channel_id 必填")
+		return
+	}
+	if len(req.Policies) > extGroupPolicyMaxItems {
+		extFail(c, http.StatusBadRequest, fmt.Sprintf("一条渠道最多 %d 条分组策略", extGroupPolicyMaxItems))
+		return
+	}
+	seen := make(map[string]bool, len(req.Policies))
+	policies := make([]model.ChannelGroupPolicy, 0, len(req.Policies))
+	for _, item := range req.Policies {
+		group := strings.TrimSpace(item.Group)
+		if group == "" || len(group) > 64 || strings.Contains(group, ",") {
+			extFail(c, http.StatusBadRequest, "分组名不能为空、不能含逗号、不超过 64 个字符")
+			return
+		}
+		if seen[group] {
+			extFail(c, http.StatusBadRequest, "分组重复: "+group)
+			return
+		}
+		if item.Weight > extGroupPolicyMaxWeight {
+			extFail(c, http.StatusBadRequest, fmt.Sprintf("权重不能超过 %d", extGroupPolicyMaxWeight))
+			return
+		}
+		seen[group] = true
+		policies = append(policies, model.ChannelGroupPolicy{Group: group, Priority: item.Priority, Weight: item.Weight})
+	}
+	if err := model.ReplaceChannelGroupPolicies(req.ChannelId, policies); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			extFail(c, http.StatusNotFound, "渠道不存在")
+			return
+		}
+		common.ApiError(c, err)
+		return
+	}
+	model.InitChannelCache()
+	common.ApiSuccess(c, gin.H{"channel_id": req.ChannelId, "group_policy_sha256": model.ChannelGroupPolicyDigest(policies)})
 }

@@ -244,6 +244,7 @@ func (channel *Channel) AddAbilities(tx *gorm.DB) error {
 	if tx != nil {
 		useDB = tx
 	}
+	forkApplyGroupPolicies(useDB, channel.Id, abilities) // yunai fork
 	for _, chunk := range lo.Chunk(abilities, 50) {
 		err := useDB.Clauses(clause.OnConflict{DoNothing: true}).Create(&chunk).Error
 		if err != nil {
@@ -309,6 +310,7 @@ func (channel *Channel) UpdateAbilities(tx *gorm.DB) error {
 		}
 	}
 
+	forkApplyGroupPolicies(tx, channel.Id, abilities) // yunai fork
 	if len(abilities) > 0 {
 		for _, chunk := range lo.Chunk(abilities, 50) {
 			err = tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&chunk).Error
@@ -348,7 +350,10 @@ func UpdateAbilityByTag(tag string, newTag *string, priority *int64, weight *uin
 	if weight != nil {
 		ability.Weight = *weight
 	}
-	return DB.Model(&Ability{}).Where("tag = ?", tag).Updates(ability).Error
+	if err := DB.Model(&Ability{}).Where("tag = ?", tag).Updates(ability).Error; err != nil {
+		return err
+	}
+	return forkReapplyGroupPoliciesByTag(tag) // yunai fork
 }
 
 var fixLock = sync.Mutex{}

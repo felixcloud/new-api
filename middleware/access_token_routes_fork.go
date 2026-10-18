@@ -15,5 +15,7 @@ func init() {
 		"GET /api/ext/logs/stats": accessTokenScopeRule("log:read"),
 		// 只有密钥摘要, 不含密钥; 与原生渠道列表同一个范围。
 		"GET /api/ext/channels/digest": accessTokenScopeRule("channel:read"),
+		// 分组级优先级 / 权重属于渠道调度, 与原生改渠道同一个范围。
+		"PUT /api/ext/channel/group-policy": accessTokenScopeRule("channel:write"),
 	})
 }
