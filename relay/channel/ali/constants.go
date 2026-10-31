@@ -33,6 +33,7 @@ var ModelList = []string{
 	"qwen3-asr-flash",
 	"qwen3-asr-flash-us",
 	"text-embedding-v1",
+	"qwen3-vl-embedding",
 	"gte-rerank-v2",
 }
 

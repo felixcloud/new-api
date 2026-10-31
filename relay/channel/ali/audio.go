@@ -832,7 +832,6 @@ func writeAliAudioSSEvent(c *gin.Context, event string, value any) error {
 	if err != nil {
 		return err
 	}
-	helper.ExtendWriteDeadline(c)
 	c.Render(-1, common.CustomEvent{Data: "event: " + event + "\n"})
 	c.Render(-1, common.CustomEvent{Data: "data: " + string(jsonData)})
 	return helper.FlushWriter(c)
