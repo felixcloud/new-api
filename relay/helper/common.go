@@ -223,6 +223,9 @@ func ResponseChunkData(c *gin.Context, resp dto.ResponsesStreamResponse, data st
 	if requestContextDone(c) {
 		return fmt.Errorf("request context done: %w", c.Request.Context().Err())
 	}
+	if ForkShouldOmitSSEEvent(c) {
+		return forkResponseChunkDataOnly(c, data)
+	} // yunai fork
 
 	event := common.CustomEvent{Data: fmt.Sprintf("event: %s\n", resp.Type)}
 	if err := event.Render(c.Writer); err != nil {

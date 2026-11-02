@@ -1215,8 +1215,10 @@ func writeTaskPluginProtocolEvent(c *gin.Context, event dto.PluginResponsesStrea
 	if err != nil {
 		return err
 	}
-	if _, err = c.Writer.Write([]byte("event: " + event.Type + "\n")); err != nil {
-		return err
+	if !helper.ForkShouldOmitSSEEvent(c) { // yunai fork
+		if _, err = c.Writer.Write([]byte("event: " + event.Type + "\n")); err != nil {
+			return err
+		}
 	}
 	if _, err = c.Writer.Write([]byte("data: " + string(encoded) + "\n\n")); err != nil {
 		return err

@@ -26,6 +26,7 @@ import (
 	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
 	"github.com/QuantumNous/new-api/pkg/wsmanager"
 	"github.com/QuantumNous/new-api/relay"
+	relayhelper "github.com/QuantumNous/new-api/relay/helper" // yunai fork
 	kitutil "github.com/QuantumNous/new-api/relaykit/relayconvert/kitutil"
 	"github.com/QuantumNous/new-api/router"
 	"github.com/QuantumNous/new-api/service"
@@ -204,7 +205,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:    ":" + port,
-		Handler: server,
+		Handler: relayhelper.ForkWrapV0CompatHandler(server), // yunai fork
 	}
 
 	go func() {
