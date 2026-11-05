@@ -34,7 +34,11 @@ func WssHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types.
 	}
 
 	if resp != nil {
-		info.TargetWs = resp.(*websocket.Conn)
+		wsConn, wsErr := forkResolveTargetWs(resp, info) // yunai fork
+		if wsErr != nil {
+			return wsErr
+		}
+		info.TargetWs = wsConn
 		defer info.TargetWs.Close()
 		var closeOnce sync.Once
 		unregister := wsmanager.Register(info.ChannelId, wsmanager.KindRealtime, func(reason string) {

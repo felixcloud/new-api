@@ -508,8 +508,12 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 		c.Set(common2.UpstreamRequestIdKey, upID)
 	}
 
-	_ = req.Body.Close()
-	_ = c.Request.Body.Close()
+	if req.Body != nil { // yunai fork
+		_ = req.Body.Close()
+	}
+	if c.Request != nil && c.Request.Body != nil { // yunai fork
+		_ = c.Request.Body.Close()
+	}
 	return resp, nil
 }
 
