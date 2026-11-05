@@ -7,7 +7,7 @@ export const meta = {
     en: "OpenAI Sora video generation (text-to-video, image-to-video, and remix)",
     zh: "OpenAI Sora 视频生成（文生视频、图生视频、remix）",
   },
-  version: "1.1.0",
+  version: "1.1.2",
   channelTypes: [55, 1], // OpenAI-type channels natively serve sora with the same wire format
   author: { name: "QuantumNous" },
   models: ["sora-2", "sora-2-pro"],
@@ -38,6 +38,26 @@ export const meta = {
 
 function trimmed(value) {
   return String(value || "").trim();
+}
+
+function hasVideoInput(req, metadata) {
+  const content = Array.isArray(metadata.content) ? metadata.content : Array.isArray(req.content) ? req.content : [];
+  for (const item of content) {
+    if (item && (item.type === "video_url" || Object.prototype.hasOwnProperty.call(item, "video_url"))) return true;
+  }
+  if (req.video_url || metadata.video_url || req.video || metadata.video) return true;
+  const refs = [].concat(req.images || [], req.image ? [req.image] : [], req.input_reference ? [req.input_reference] : []);
+  for (const ref of refs) {
+    if (typeof ref === "string" && /\.(mp4|mov|webm|avi|mkv)(\?|$)/i.test(ref)) return true;
+  }
+  return false;
+}
+
+function maxTokensPerSecond(resolution) {
+  if (resolution === "480p") return 9720;
+  if (resolution === "1080p") return 48960;
+  if (resolution === "4k") return 194400;
+  return 21600;
 }
 
 function responsesInput(req) {
@@ -127,9 +147,22 @@ export function parseSubmitResponse(ctx, resp) {
 export function extractUsage(ctx) {
   if (ctx.action === "remix") return {};
   const req = ctx.requestBody || {};
-  let seconds = Number(req.seconds || req.duration || 4);
+  const metadata =
+    (req.vendorBody && typeof req.vendorBody === "object" ? req.vendorBody : null) ||
+    (req.metadata && typeof req.metadata === "object" ? req.metadata : {});
+  let seconds = Number(req.seconds || req.duration || metadata.duration || 4);
   if (!Number.isFinite(seconds) || seconds <= 0) seconds = 4;
-  return { seconds: Math.min(seconds, 3600), size: req.size || "720x1280" };
+  const rawSize = trimmed(req.size);
+  const size = ["720x1280", "1280x720", "1792x1024", "1024x1792"].includes(rawSize) ? rawSize : "720x1280";
+  const facts = { seconds: Math.min(seconds, 3600), size: size };
+  const modelName = trimmed((ctx && (ctx.upstreamModel || ctx.model)) || req.model).toLowerCase();
+  if (modelName.includes("seedance") || metadata.resolution || req.resolution || metadata.content || req.content) {
+    const rawRes = trimmed(metadata.resolution || req.resolution || req.size).toLowerCase();
+    if (["480p", "720p", "1080p", "4k"].includes(rawRes)) facts.resolution = rawRes;
+    facts.video_input = hasVideoInput(req, metadata) ? "video" : "none";
+    if (typeof metadata.generate_audio === "boolean") facts.generate_audio = metadata.generate_audio;
+  }
+  return facts;
 }
 
 export function extractUsageOnComplete(task, taskResult, body) {
@@ -138,6 +171,20 @@ export function extractUsageOnComplete(task, taskResult, body) {
   if (Number.isFinite(seconds) && seconds > 0) facts.seconds = Math.min(seconds, 3600);
   const size = trimmed((body || {}).size);
   if (["720x1280", "1280x720", "1792x1024", "1024x1792"].includes(size)) facts.size = size;
+  const state = taskResult && taskResult.plugin_state && typeof taskResult.plugin_state === "object" ? taskResult.plugin_state : {};
+  let tokens = Number(state.tokens || 0);
+  if (!Number.isFinite(tokens) || tokens <= 0) {
+    tokens = Number((taskResult && (taskResult.completion_tokens || taskResult.total_tokens)) || 0);
+  }
+  if (Number.isFinite(tokens) && tokens > 0) facts.tokens = tokens;
+  const res = trimmed(state.resolution).toLowerCase();
+  if (["480p", "720p", "1080p", "4k"].includes(res)) facts.resolution = res;
+  const dur = Number(state.seconds || 0);
+  if (Number.isFinite(dur) && dur > 0) facts.seconds = Math.min(dur, 3600);
+  if (typeof state.generate_audio === "boolean") facts.generate_audio = state.generate_audio;
+  if (["video", "none"].includes(trimmed(state.video_input).toLowerCase())) {
+    facts.video_input = trimmed(state.video_input).toLowerCase();
+  }
   return facts;
 }
 
@@ -160,6 +207,46 @@ export function parseTaskResult(ctx, body) {
   if (!mapped) result.reason = "unrecognized status: " + String(body.status || "");
   if (body.progress > 0 && body.progress < 100) result.progress = body.progress + "%";
   if (result.status === "FAILURE") result.reason = body.error && body.error.message ? body.error.message : "task failed";
+  // Compatible providers may return a direct video URL in metadata.
+  // Keep Sora's content-proxy fallback when no HTTPS URL is provided.
+  if (result.status === "SUCCESS" && body.metadata &&
+      typeof body.metadata.url === "string" && /^https:\/\/[^/\s]+\//.test(body.metadata.url)) {
+    result.url = body.metadata.url;
+    if (ctx && ctx.baseUrl && ctx.taskId && ctx.apiKey && typeof utils !== "undefined" && utils && typeof utils.fetch === "function") {
+      try {
+        const extra = utils.fetch({
+          url: ctx.baseUrl + "/v1/video/generations/" + encodeURIComponent(ctx.taskId),
+          method: "GET",
+          headers: { Authorization: "Bearer " + ctx.apiKey },
+        });
+        if (extra && extra.status === 200 && extra.body && typeof extra.body === "object") {
+          const outer = extra.body.data && typeof extra.body.data === "object" ? extra.body.data : extra.body;
+          const inner = outer.data && typeof outer.data === "object" ? outer.data : outer;
+          const usage = inner.usage || outer.usage || body.usage || {};
+          const completionTokens = Number(usage.completion_tokens || 0);
+          const totalTokens = Number(usage.total_tokens || completionTokens || 0);
+          const tokens = completionTokens > 0 ? completionTokens : totalTokens;
+          if (Number.isFinite(completionTokens) && completionTokens > 0) result.completionTokens = completionTokens;
+          if (Number.isFinite(totalTokens) && totalTokens > 0) result.totalTokens = totalTokens;
+          const state = {};
+          if (Number.isFinite(tokens) && tokens > 0) state.tokens = tokens;
+          const content = inner.content && typeof inner.content === "object" ? inner.content : {};
+          const res = trimmed(content.resolution || inner.resolution).toLowerCase();
+          if (["480p", "720p", "1080p", "4k"].includes(res)) state.resolution = res;
+          const dur = Number(inner.duration || outer.duration || 0);
+          if (Number.isFinite(dur) && dur > 0) state.seconds = Math.min(dur, 3600);
+          if (typeof inner.generate_audio === "boolean") state.generate_audio = inner.generate_audio;
+          if (Number.isFinite(tokens) && tokens > 0 && Number.isFinite(dur) && dur > 0 && state.resolution) {
+            const maxNoVideoTokens = dur * maxTokensPerSecond(state.resolution) * 1.15;
+            state.video_input = tokens > maxNoVideoTokens ? "video" : "none";
+          }
+          if (Object.keys(state).length > 0) result.state = state;
+        }
+      } catch (e) {
+        // Keep direct URL if supplementary usage fetch fails.
+      }
+    }
+  }
   return result;
 }
 
