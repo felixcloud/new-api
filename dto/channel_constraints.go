@@ -40,6 +40,7 @@ const (
 	FilterTaskPluginEndpoint ChannelFilterKind = "task_plugin_endpoint"
 	FilterTaskPluginIdentity ChannelFilterKind = "task_plugin_identity"
 	FilterResponsesWebSocket ChannelFilterKind = "responses_websocket"
+	FilterAssetProvider      ChannelFilterKind = "asset_provider" // yunai fork
 )
 
 type ChannelFilter struct {
@@ -51,6 +52,7 @@ type ChannelFilter struct {
 	// TaskPluginRelayOnly excludes endpoint candidates after an ordinary relay
 	// channel wins selection, so retries keep using the same protocol handler.
 	TaskPluginRelayOnly bool
+	AssetProvider       string // yunai fork
 }
 
 type ChannelConstraints struct {

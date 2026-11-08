@@ -45,6 +45,7 @@ func Distribute() func(c *gin.Context) {
 			RequestPath: c.Request.URL.Path,
 		})
 		service.AppendTaskPluginIdentityFilter(c, c.GetString("expected_task_plugin_key"))
+		forkApplyAssetProviderConstraint(c) // yunai fork
 		modelRequest, shouldSelectChannel, err := getModelRequest(c)
 		if err != nil {
 			abortWithOpenAiMessage(c, invalidRequestStatus(err), i18n.T(c, i18n.MsgDistributorInvalidRequest, map[string]any{"Error": err.Error()}))

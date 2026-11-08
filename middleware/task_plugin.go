@@ -542,6 +542,7 @@ func RouteTaskPluginEndpoint() gin.HandlerFunc {
 		filterIndex := len(constraints.Filters)
 		constraints.AddFilter(filter)
 		constraints.AddFilter(dto.ChannelFilter{Kind: dto.FilterRequestPath, RequestPath: c.Request.URL.Path})
+		forkApplyAssetProviderConstraint(c) // yunai fork
 		group := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
 		channel, _, selectErr := service.SelectChannelForRequest(c, request.Model, &service.RetryParam{
 			Ctx: c, ModelName: request.Model, TokenGroup: group,
