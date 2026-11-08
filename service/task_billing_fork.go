@@ -58,6 +58,83 @@ func forkRecordZeroDeltaSettlementLog(task *model.Task, actualQuota int, reason 
 	})
 }
 
+// forkEnrichTaskDataFromPluginState 将插件在轮询时提取的计费与回显字段(tokens / resolution / seconds / generate_audio)
+// 以及直出视频地址回填到 task.Data(当上游 /v1/videos/{id} 响应不含 usage 时), 使 GET /v1/video/generations/{task_id}
+// 的调用方(如 yunai 视频创作中心)能按统一格式读取 data.usage 与 data.content.video_url。
+func forkEnrichTaskDataFromPluginState(task *model.Task, taskResult *relaycommon.TaskInfo) {
+	if task == nil || len(task.Data) == 0 {
+		return
+	}
+	var m map[string]any
+	if err := common.Unmarshal(task.Data, &m); err != nil || m == nil {
+		return
+	}
+	changed := false
+	var tokens int
+	if taskResult != nil {
+		if taskResult.CompletionTokens > 0 {
+			tokens = taskResult.CompletionTokens
+		} else if taskResult.TotalTokens > 0 {
+			tokens = taskResult.TotalTokens
+		}
+	}
+	if len(task.PrivateData.PluginState) > 0 {
+		var ps map[string]any
+		if err := common.Unmarshal(task.PrivateData.PluginState, &ps); err == nil && ps != nil {
+			if tokens <= 0 {
+				if t, ok := ps["tokens"].(float64); ok && t > 0 {
+					tokens = int(t)
+				}
+			}
+			if _, hasRes := m["resolution"]; !hasRes {
+				if res, ok := ps["resolution"].(string); ok && res != "" {
+					m["resolution"] = res
+					changed = true
+				}
+			}
+			if _, hasDur := m["duration"]; !hasDur {
+				if sec, ok := ps["seconds"].(float64); ok && sec > 0 {
+					m["duration"] = sec
+					changed = true
+				}
+			}
+			if _, hasAud := m["generate_audio"]; !hasAud {
+				if aud, ok := ps["generate_audio"].(bool); ok {
+					m["generate_audio"] = aud
+					changed = true
+				}
+			}
+		}
+	}
+	if tokens > 0 {
+		usage, ok := m["usage"].(map[string]any)
+		if !ok || usage == nil {
+			m["usage"] = map[string]any{
+				"completion_tokens": tokens,
+				"total_tokens":      tokens,
+			}
+			changed = true
+		}
+	}
+	if taskResult != nil && taskResult.Url != "" {
+		content, ok := m["content"].(map[string]any)
+		if !ok || content == nil {
+			m["content"] = map[string]any{
+				"video_url": taskResult.Url,
+			}
+			changed = true
+		} else if _, hasUrl := content["video_url"]; !hasUrl {
+			content["video_url"] = taskResult.Url
+			changed = true
+		}
+	}
+	if changed {
+		if b, err := common.Marshal(m); err == nil {
+			task.Data = b
+		}
+	}
+}
+
 // forkSettleTaskBillingOnComplete 包住上游的 settleTaskBillingOnComplete:
 //   - 倍率计费路径把完成时的实际事实(实际 Token、分辨率 …)合并进计费上下文, 结算日志据此写 usage_facts;
 //   - 成功任务没走差额结算(按次计费 / 上游没回 Token / 没配倍率)时补一条 0 额度的结算日志。

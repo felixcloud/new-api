@@ -13,9 +13,19 @@ import (
 )
 
 func TestDetectAssetProviderFromBody(t *testing.T) {
-	volcBody := []byte(`{"model":"doubao-seedance-2-0-260128","metadata":{"content":[{"type":"image_url","image_url":{"url":"asset://asset-20260408142310-abcde"}}]}}`)
+	volcBody := []byte(`{"model":"doubao-seedance-2-0-260128","metadata":{"asset_provider":"volc_official","content":[{"type":"image_url","image_url":{"url":"asset://asset-20260408142310-abcde"}}]}}`)
 	if got := DetectAssetProviderFromBody(volcBody); got != model.AssetProviderVolcOfficial {
-		t.Fatalf("expected %q for asset://asset-*, got %q", model.AssetProviderVolcOfficial, got)
+		t.Fatalf("expected %q for metadata.asset_provider=volc_official, got %q", model.AssetProviderVolcOfficial, got)
+	}
+
+	zchmyExplicit := []byte(`{"model":"doubao-seedance-2-0-260128","metadata":{"asset_provider":"zchmy","content":[{"type":"image_url","image_url":{"url":"asset://asset-20261108193046-pun1k"}}]}}`)
+	if got := DetectAssetProviderFromBody(zchmyExplicit); got != model.AssetProviderZchmy {
+		t.Fatalf("expected %q for metadata.asset_provider=zchmy, got %q", model.AssetProviderZchmy, got)
+	}
+
+	ambiguousAsset := []byte(`{"model":"doubao-seedance-2-0-260128","metadata":{"content":[{"type":"image_url","image_url":{"url":"asset://asset-20261108193046-pun1k"}}]}}`)
+	if got := DetectAssetProviderFromBody(ambiguousAsset); got != "" {
+		t.Fatalf("expected empty provider for ambiguous asset://asset-* without asset_provider, got %q", got)
 	}
 
 	zchmyBody := []byte(`{"model":"doubao-seedance-2-0-260128","metadata":{"content":[{"type":"image_url","image_url":{"url":"asset://om-a-019d70a7f6d27297"}}]}}`)

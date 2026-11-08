@@ -560,6 +560,7 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 	if len(taskResult.PluginState) > 0 {
 		task.PrivateData.PluginState = taskResult.PluginState
 	}
+	forkEnrichTaskDataFromPluginState(task, taskResult) // yunai fork
 	if isNonTerminalPollStatus(parsedStatus) {
 		task.PrivateData.PollFailures = 0
 	}
