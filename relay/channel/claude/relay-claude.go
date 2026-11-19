@@ -279,7 +279,7 @@ func HandleStreamFinalResponse(c *gin.Context, info *relaycommon.RelayInfo, clau
 	// was streamed, so a refusal before any output keeps its zeros.
 	missingInputUsage := buildOpenAIStyleUsageFromClaudeUsage(claudeInfo.Usage).PromptTokens == 0
 	missingOutputUsage := claudeInfo.Usage.CompletionTokens == 0 && claudeInfo.ResponseText.Len() > 0
-	if missingInputUsage || missingOutputUsage || !claudeInfo.Done {
+	if !forkShouldSkipEmptyStreamEstimate(info, claudeInfo) && (missingInputUsage || missingOutputUsage || !claudeInfo.Done) { // yunai fork
 		if common.DebugEnabled {
 			common.SysLog(common.LogText("claude response usage is not complete, maybe upstream error"))
 		}
