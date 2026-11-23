@@ -43,6 +43,7 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 	if err != nil {
 		return types.NewError(fmt.Errorf("failed to copy request to ImageRequest: %w", err), types.ErrorCodeInvalidRequest, types.ErrOptionWithSkipRetry())
 	}
+	forkInitImageBillingFacts(c, info, request) // yunai fork
 
 	err = helper.ModelMappedHelper(c, info, request)
 	if err != nil {

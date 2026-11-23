@@ -539,6 +539,7 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 		InjectTieredBillingInfo(other, relayInfo, tieredResult)
 
 	}
+	ForkAnnotateImageLog(relayInfo, other) // yunai fork
 
 	attachQuotaSaturation(ctx, relayInfo, other)
 

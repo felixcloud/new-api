@@ -252,6 +252,9 @@ type RelayInfo struct {
 	// TaskUsageFacts(yunai fork): 倍率计费路径下插件给出的计费事实(估算 Token、分辨率、是否带参考视频 …),
 	// 只写进日志供外部业务系统计价, 不参与 new-api 自己的额度计算
 	TaskUsageFacts map[string]any
+	// ImageBillingFacts(yunai fork): 同步出图链路采集的计费事实(实际出图张数、参考图张数、逐张尺寸),
+	// 写入消费日志 other 供外部业务系统计价, 不参与 new-api 自己的额度计算
+	ImageBillingFacts *ImageBillingFacts
 }
 
 // UpdateImageCount replaces the billable quantity without changing the frozen
@@ -260,6 +263,7 @@ func (info *RelayInfo) UpdateImageCount(count int64) {
 	if info == nil || count <= 0 || count > int64(dto.MaxImageN) {
 		return
 	}
+	info.forkRecordImageCount(count) // yunai fork
 	if info.PriceData.UsePrice {
 		info.PriceData.AddOtherRatio("n", float64(count))
 	}
